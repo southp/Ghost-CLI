@@ -28,20 +28,26 @@ describe('Unit: Tasks > yarn-install', function () {
         const subTasks = yarnInstall.subTasks;
         const ctx = {installPath: '/var/www/ghost/versions/1.5.0'};
         const listrStub = sinon.stub().callsFake((tasks) => {
-            expect(tasks).to.have.length(3);
+            // dist + cacheRead + download + yarn = 4
+            expect(tasks).to.have.length(4);
 
             return Promise.each(tasks, (task) => {
+                if (task.enabled && !task.enabled()) {
+                    return;
+                }
                 const result = task.task(ctx);
                 return isObservable(result) ? result.toPromise() : result;
             });
         });
 
         const distTaskStub = sinon.stub(subTasks, 'dist').resolves();
+        const cacheReadStub = sinon.stub(subTasks, 'cacheRead').resolves();
         const downloadTaskStub = sinon.stub(subTasks, 'download');
 
         return yarnInstall({listr: listrStub}).then(() => {
             expect(listrStub.calledOnce).to.be.true;
             expect(distTaskStub.calledOnce).to.be.true;
+            expect(cacheReadStub.calledOnce).to.be.true;
             expect(downloadTaskStub.calledOnce).to.be.true;
             expect(yarnStub.calledOnce).to.be.true;
             expect(yarnStub.args[0][0]).to.deep.equal(['install', '--no-emoji', '--no-progress']);
@@ -62,15 +68,19 @@ describe('Unit: Tasks > yarn-install', function () {
         const subTasks = yarnInstall.subTasks;
         const ctx = {installPath: '/var/www/ghost/versions/1.5.0'};
         const listrStub = sinon.stub().callsFake((tasks) => {
-            expect(tasks).to.have.length(3);
+            expect(tasks).to.have.length(4);
 
             return Promise.each(tasks, (task) => {
+                if (task.enabled && !task.enabled()) {
+                    return;
+                }
                 const result = task.task(ctx);
                 return isObservable(result) ? result.toPromise() : result;
             });
         });
 
         const distTaskStub = sinon.stub(subTasks, 'dist').resolves();
+        const cacheReadStub = sinon.stub(subTasks, 'cacheRead').resolves();
         const downloadTaskStub = sinon.stub(subTasks, 'download');
 
         process.env.GHOST_NODE_VERSION_CHECK = 'false';
@@ -78,6 +88,7 @@ describe('Unit: Tasks > yarn-install', function () {
         return yarnInstall({listr: listrStub}).then(() => {
             expect(listrStub.calledOnce).to.be.true;
             expect(distTaskStub.calledOnce).to.be.true;
+            expect(cacheReadStub.calledOnce).to.be.true;
             expect(downloadTaskStub.calledOnce).to.be.true;
             expect(yarnStub.calledOnce).to.be.true;
             expect(yarnStub.args[0][0]).to.deep.equal(['install', '--no-emoji', '--no-progress', '--ignore-engines']);
@@ -102,6 +113,7 @@ describe('Unit: Tasks > yarn-install', function () {
             expect(listrStub.calledOnce).to.be.true;
 
             const tasks = listrStub.args[0][0];
+            // archive path: extract + yarn = 2 (no cache tasks)
             expect(tasks).to.have.length(2);
 
             tasks[0].task(ctx);
@@ -120,15 +132,19 @@ describe('Unit: Tasks > yarn-install', function () {
         const env = setupTestFolder();
         const ctx = {installPath: env.dir};
         const listrStub = sinon.stub().callsFake((tasks) => {
-            expect(tasks).to.have.length(3);
+            expect(tasks).to.have.length(4);
 
             return Promise.each(tasks, (task) => {
+                if (task.enabled && !task.enabled()) {
+                    return;
+                }
                 const result = task.task(ctx);
                 return isObservable(result) ? result.toPromise() : result;
             });
         });
 
         const distTaskStub = sinon.stub(subTasks, 'dist').resolves();
+        const cacheReadStub = sinon.stub(subTasks, 'cacheRead').resolves();
         const downloadTaskStub = sinon.stub(subTasks, 'download');
 
         return yarnInstall({listr: listrStub, verbose: true}).then(() => {
@@ -137,6 +153,7 @@ describe('Unit: Tasks > yarn-install', function () {
             expect(error.message).to.equal('an error occurred');
             expect(listrStub.calledOnce).to.be.true;
             expect(distTaskStub.calledOnce).to.be.true;
+            expect(cacheReadStub.calledOnce).to.be.true;
             expect(downloadTaskStub.calledOnce).to.be.true;
             expect(yarnStub.calledOnce).to.be.true;
             expect(yarnStub.args[0][0]).to.deep.equal(['install', '--no-emoji', '--no-progress']);
@@ -147,6 +164,37 @@ describe('Unit: Tasks > yarn-install', function () {
                 verbose: true
             });
             expect(fs.existsSync(env.dir)).to.be.false;
+        });
+    });
+
+    it('--no-cache disables the cacheRead task and passes noCache to download', function () {
+        const yarnStub = sinon.stub().returns(new Observable(o => o.complete()));
+        const yarnInstall = proxyquire(modulePath, {
+            '../utils/yarn': yarnStub
+        });
+        const subTasks = yarnInstall.subTasks;
+        const ctx = {installPath: '/var/www/ghost/versions/1.5.0'};
+        let cacheReadEnabled;
+        const listrStub = sinon.stub().callsFake((tasks) => {
+            cacheReadEnabled = tasks[1].enabled();
+            return Promise.each(tasks, (task) => {
+                if (task.enabled && !task.enabled()) {
+                    return;
+                }
+                const result = task.task(ctx);
+                return isObservable(result) ? result.toPromise() : result;
+            });
+        });
+
+        sinon.stub(subTasks, 'dist').resolves();
+        const cacheReadStub = sinon.stub(subTasks, 'cacheRead').resolves();
+        const downloadTaskStub = sinon.stub(subTasks, 'download');
+
+        return yarnInstall({listr: listrStub}, null, {noCache: true}).then(() => {
+            expect(cacheReadEnabled).to.be.false;
+            expect(cacheReadStub.called).to.be.false;
+            expect(downloadTaskStub.calledOnce).to.be.true;
+            expect(downloadTaskStub.args[0][1]).to.deep.equal({noCache: true});
         });
     });
 
@@ -267,6 +315,63 @@ describe('Unit: Tasks > yarn-install', function () {
         });
     });
 
+    describe('cacheRead subtask', function () {
+        it('does nothing on cache miss', async function () {
+            const existsStub = sinon.stub().returns(false);
+            const cacheRead = proxyquire(modulePath, {
+                'fs-extra': {existsSync: existsStub},
+                '../utils/get-cache-dir': () => '/ghost/cache'
+            }).subTasks.cacheRead;
+            const onCacheHit = sinon.stub();
+            const ctx = {version: '5.0.0', shasum: 'abc123'};
+
+            await cacheRead(ctx, {onCacheHit});
+
+            expect(ctx.cachedData).to.be.undefined;
+            expect(onCacheHit.called).to.be.false;
+        });
+
+        it('sets cachedData and calls onCacheHit callback on cache hit with valid shasum', async function () {
+            const fakeData = Buffer.from('tarball content');
+            const existsStub = sinon.stub().returns(true);
+            const readFileStub = sinon.stub().returns(fakeData);
+            const shasumStub = sinon.stub().returns('abc123');
+            const cacheRead = proxyquire(modulePath, {
+                'fs-extra': {existsSync: existsStub, readFileSync: readFileStub},
+                shasum: shasumStub,
+                '../utils/get-cache-dir': () => '/ghost/cache'
+            }).subTasks.cacheRead;
+            const onCacheHit = sinon.stub();
+            const ctx = {version: '5.0.0', shasum: 'abc123'};
+
+            await cacheRead(ctx, {onCacheHit});
+
+            expect(ctx.cachedData).to.equal(fakeData);
+            expect(onCacheHit.calledOnce).to.be.true;
+        });
+
+        it('removes corrupt cache file and skips on shasum mismatch', async function () {
+            const fakeData = Buffer.from('corrupted tarball');
+            const existsStub = sinon.stub().returns(true);
+            const readFileStub = sinon.stub().returns(fakeData);
+            const shasumStub = sinon.stub().returns('badshasum');
+            const removeStub = sinon.stub();
+            const cacheRead = proxyquire(modulePath, {
+                'fs-extra': {existsSync: existsStub, readFileSync: readFileStub, removeSync: removeStub},
+                shasum: shasumStub,
+                '../utils/get-cache-dir': () => '/ghost/cache'
+            }).subTasks.cacheRead;
+            const onCacheHit = sinon.stub();
+            const ctx = {version: '5.0.0', shasum: 'abc123'};
+
+            await cacheRead(ctx, {onCacheHit});
+
+            expect(ctx.cachedData).to.be.undefined;
+            expect(removeStub.calledWith('/ghost/cache/ghost-5.0.0.tgz')).to.be.true;
+            expect(onCacheHit.called).to.be.false;
+        });
+    });
+
     describe('download subtask', function () {
         it('rejects if shasum does not match the sha hash of the downloaded data', function () {
             const downloadStub = sinon.stub().resolves({downloadedData: true});
@@ -280,7 +385,7 @@ describe('Unit: Tasks > yarn-install', function () {
                 shasum: 'asdf1234'
             };
 
-            return downloadTask(ctx).then(() => {
+            return downloadTask(ctx, {noCache: true}).then(() => {
                 expect(false, 'error should have been thrown').to.be.true;
             }).catch((error) => {
                 expect(error).to.be.an.instanceof(errors.CliError);
@@ -305,11 +410,11 @@ describe('Unit: Tasks > yarn-install', function () {
             const ctx = {
                 tarball: 'something.tgz',
                 shasum: 'asdf1234',
+                version: '1.0.0',
                 installPath: path.join(env.dir, 'versions/1.0.0')
             };
 
-            return downloadTask(ctx).then(() => {
-                expect(downloadStub.calledOnce).to.be.true;
+            return downloadTask(ctx, {noCache: true}).then(() => {
                 expect(downloadStub.calledOnce).to.be.true;
                 expect(downloadStub.calledWithExactly('something.tgz'));
                 expect(shasumStub.calledOnce).to.be.true;
@@ -340,10 +445,11 @@ describe('Unit: Tasks > yarn-install', function () {
             const ctx = {
                 tarball: 'something.tgz',
                 shasum: 'asdf1234',
+                version: '1.0.0',
                 installPath: path.join(env.dir, 'versions/1.0.0')
             };
 
-            return downloadTask(ctx).then(() => {
+            return downloadTask(ctx, {noCache: true}).then(() => {
                 expect(false, 'Error should have been thrown').to.be.true;
             }).catch((error) => {
                 expect(error.message).to.equal('an error occurred');
@@ -354,6 +460,95 @@ describe('Unit: Tasks > yarn-install', function () {
                 expect(decompressStub.calledOnce).to.be.true;
                 expect(fs.existsSync(ctx.installPath)).to.be.false;
             });
+        });
+
+        it('saves tarball to cache after successful download when noCache is false', async function () {
+            const env = setupTestFolder();
+            const fakeData = Buffer.from('tarball data');
+            const downloadStub = sinon.stub().resolves(fakeData);
+            const shasumStub = sinon.stub().returns('asdf1234');
+            const decompressStub = sinon.stub().resolves();
+            const writeFileStub = sinon.stub();
+            const ensureDirStub = sinon.stub();
+            const downloadTask = proxyquire(modulePath, {
+                download: downloadStub,
+                shasum: shasumStub,
+                decompress: decompressStub,
+                'fs-extra': {
+                    ensureDirSync: ensureDirStub,
+                    writeFileSync: writeFileStub,
+                    removeSync: sinon.stub()
+                },
+                '../utils/get-cache-dir': () => '/ghost/cache'
+            }).subTasks.download;
+            const ctx = {
+                tarball: 'something.tgz',
+                shasum: 'asdf1234',
+                version: '5.0.0',
+                installPath: path.join(env.dir, 'versions/5.0.0')
+            };
+
+            await downloadTask(ctx, {noCache: false});
+
+            expect(ensureDirStub.calledWith('/ghost/cache')).to.be.true;
+            expect(writeFileStub.calledWith('/ghost/cache/ghost-5.0.0.tgz', fakeData)).to.be.true;
+        });
+
+        it('does not save tarball to cache when noCache is true', async function () {
+            const env = setupTestFolder();
+            const fakeData = Buffer.from('tarball data');
+            const downloadStub = sinon.stub().resolves(fakeData);
+            const shasumStub = sinon.stub().returns('asdf1234');
+            const decompressStub = sinon.stub().resolves();
+            const writeFileStub = sinon.stub();
+            const downloadTask = proxyquire(modulePath, {
+                download: downloadStub,
+                shasum: shasumStub,
+                decompress: decompressStub,
+                'fs-extra': {
+                    ensureDirSync: sinon.stub(),
+                    removeSync: sinon.stub()
+                },
+                '../utils/get-cache-dir': () => '/ghost/cache'
+            }).subTasks.download;
+            const ctx = {
+                tarball: 'something.tgz',
+                shasum: 'asdf1234',
+                version: '5.0.0',
+                installPath: path.join(env.dir, 'versions/5.0.0')
+            };
+
+            await downloadTask(ctx, {noCache: true});
+
+            expect(writeFileStub.called).to.be.false;
+        });
+
+        it('uses cachedData instead of downloading when available', async function () {
+            const env = setupTestFolder();
+            const fakeData = Buffer.from('cached tarball');
+            const downloadStub = sinon.stub();
+            const decompressStub = sinon.stub().resolves();
+            const downloadTask = proxyquire(modulePath, {
+                download: downloadStub,
+                decompress: decompressStub,
+                'fs-extra': {
+                    ensureDirSync: sinon.stub(),
+                    removeSync: sinon.stub()
+                }
+            }).subTasks.download;
+            const ctx = {
+                tarball: 'something.tgz',
+                shasum: 'asdf1234',
+                version: '5.0.0',
+                installPath: path.join(env.dir, 'versions/5.0.0'),
+                cachedData: fakeData
+            };
+
+            await downloadTask(ctx);
+
+            expect(downloadStub.called).to.be.false;
+            expect(decompressStub.calledOnce).to.be.true;
+            expect(decompressStub.args[0][0]).to.equal(fakeData);
         });
     });
 });

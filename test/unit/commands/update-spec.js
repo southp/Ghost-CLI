@@ -245,7 +245,8 @@ describe('Unit: Commands > Update', function () {
                 activeVersion: '2.0.0',
                 ui,
                 zip: '',
-                v1: false
+                v1: false,
+                noCache: false
             });
             expect(ui.log.calledOnce).to.be.false;
             expect(ui.listr.calledOnce).to.be.true;
@@ -321,7 +322,8 @@ describe('Unit: Commands > Update', function () {
                 ui,
                 activeVersion: '1.25.0',
                 zip: '',
-                v1: false
+                v1: false,
+                noCache: false
             });
             expect(ui.log.calledOnce).to.be.false;
             expect(ui.listr.calledOnce).to.be.true;
@@ -364,7 +366,8 @@ describe('Unit: Commands > Update', function () {
                 activeVersion: '1.0.0',
                 ui: ui,
                 zip: '',
-                v1: false
+                v1: false,
+                noCache: false
             });
             expect(ui.log.calledTwice).to.be.true;
             expect(ui.log.args[0][0]).to.match(/install is using out-of-date configuration/);
@@ -433,7 +436,8 @@ describe('Unit: Commands > Update', function () {
                 ui: ui,
                 rollback: true,
                 zip: '',
-                v1: false
+                v1: false,
+                noCache: false
             });
             expect(ui.log.calledOnce).to.be.true;
             expect(ui.log.args[0][0]).to.match(/up to date/);
@@ -556,7 +560,8 @@ describe('Unit: Commands > Update', function () {
                 ui,
                 rollback: true,
                 zip: '',
-                v1: true
+                v1: true,
+                noCache: false
             };
 
             expect(runCommandStub.calledTwice).to.be.true;
@@ -624,7 +629,8 @@ describe('Unit: Commands > Update', function () {
                 ui,
                 rollback: true,
                 zip: '',
-                v1: false
+                v1: false,
+                noCache: false
             };
 
             expect(runCommandStub.calledTwice).to.be.true;
@@ -854,6 +860,48 @@ describe('Unit: Commands > Update', function () {
             await instance.downloadAndUpdate(ctx, {});
             expect(fs.existsSync(ctx.installPath)).to.be.false;
             expect(yarnInstallStub.calledOnce).to.be.true;
+        });
+
+        it('passes noCache and onCacheHit to yarnInstall', async function () {
+            const yarnInstallStub = sinon.stub().resolves();
+            const UpdateCommand = proxyquire(modulePath, {
+                '../tasks/yarn-install': yarnInstallStub
+            });
+            const instance = new UpdateCommand({}, {});
+            const env = setupTestFolder();
+            const ctx = {
+                installPath: path.join(env.dir, 'versions/1.0.0'),
+                version: '1.0.0',
+                noCache: true
+            };
+
+            await instance.downloadAndUpdate(ctx, {});
+
+            expect(yarnInstallStub.calledOnce).to.be.true;
+            const [, , opts] = yarnInstallStub.args[0];
+            expect(opts.noCache).to.be.true;
+            expect(opts.onCacheHit).to.be.a('function');
+        });
+
+        it('onCacheHit callback updates task title to cached variant', async function () {
+            const yarnInstallStub = sinon.stub().resolves();
+            const UpdateCommand = proxyquire(modulePath, {
+                '../tasks/yarn-install': yarnInstallStub
+            });
+            const instance = new UpdateCommand({}, {});
+            const env = setupTestFolder();
+            const ctx = {
+                installPath: path.join(env.dir, 'versions/2.0.0'),
+                version: '2.0.0',
+                noCache: false
+            };
+            const task = {};
+
+            await instance.downloadAndUpdate(ctx, task);
+
+            const [, , opts] = yarnInstallStub.args[0];
+            opts.onCacheHit();
+            expect(task.title).to.equal('Updating Ghost to v2.0.0 (cached)');
         });
     });
 

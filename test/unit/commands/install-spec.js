@@ -4,6 +4,7 @@ const proxyquire = require('proxyquire').noCallThru();
 const Promise = require('bluebird');
 const path = require('path');
 const fs = require('fs-extra');
+const {setupTestFolder, cleanupTestFolders} = require('../../utils/test-folder');
 
 const modulePath = '../../../lib/commands/install';
 const errors = require('../../../lib/errors');
@@ -481,6 +482,97 @@ describe('Unit: Commands > Install', function () {
                 version: '1.5.0',
                 cliVersion: '1.0.0',
                 channel: 'next'
+            });
+        });
+    });
+
+    describe('tasks > cleanInstallDirectory', function () {
+        after(() => {
+            cleanupTestFolders();
+        });
+
+        it('removes versions and content dirs but leaves other files intact', function () {
+            const env = setupTestFolder({
+                dirs: ['versions', 'content'],
+                files: [{path: 'config.production.json', content: '{}'}]
+            });
+            const cwdStub = sinon.stub(process, 'cwd').returns(env.dir);
+
+            const InstallCommand = require(modulePath);
+            const instance = new InstallCommand({}, {});
+
+            instance.cleanInstallDirectory();
+
+            expect(fs.existsSync(path.join(env.dir, 'versions'))).to.be.false;
+            expect(fs.existsSync(path.join(env.dir, 'content'))).to.be.false;
+            expect(fs.existsSync(path.join(env.dir, 'config.production.json'))).to.be.true;
+
+            cwdStub.restore();
+        });
+
+        it('does not throw if installDirs entries do not exist', function () {
+            const env = setupTestFolder({});
+            const cwdStub = sinon.stub(process, 'cwd').returns(env.dir);
+
+            const InstallCommand = require(modulePath);
+            const instance = new InstallCommand({}, {});
+
+            expect(() => instance.cleanInstallDirectory()).to.not.throw();
+
+            cwdStub.restore();
+        });
+    });
+
+    describe('tasks > yarnInstall options', function () {
+        it('passes noCache and onCacheHit to yarnInstall', function () {
+            const yarnInstallStub = sinon.stub().resolves();
+            const ensureStructureStub = sinon.stub().resolves();
+            const dirEmptyStub = sinon.stub().returns(true);
+            const listrStub = sinon.stub().callsFake((tasks, ctx) => Promise.each(tasks, task => task.task(ctx, {})));
+
+            const InstallCommand = proxyquire(modulePath, {
+                '../tasks/yarn-install': yarnInstallStub,
+                '../tasks/ensure-structure': ensureStructureStub,
+                '../utils/dir-is-empty': dirEmptyStub
+            });
+            const testInstance = new InstallCommand({listr: listrStub}, {cliVersion: '1.0.0'});
+            sinon.stub(testInstance, 'runCommand').resolves();
+            sinon.stub(testInstance, 'version').resolves();
+            sinon.stub(testInstance, 'link').resolves();
+            sinon.stub(testInstance, 'defaultThemes').resolves();
+
+            return testInstance.run({version: '1.0.0', setup: false, 'check-empty': true, zip: null, 'no-cache': true}).then(() => {
+                expect(yarnInstallStub.calledOnce).to.be.true;
+                const [, , opts] = yarnInstallStub.args[0];
+                expect(opts.noCache).to.be.true;
+                expect(opts.onCacheHit).to.be.a('function');
+            });
+        });
+
+        it('onCacheHit callback updates task title to cached variant', function () {
+            const yarnInstallStub = sinon.stub().resolves();
+            const ensureStructureStub = sinon.stub().resolves();
+            const dirEmptyStub = sinon.stub().returns(true);
+            const task = {};
+            const listrStub = sinon.stub().callsFake((tasks, ctx) => Promise.each(tasks, t => t.task(ctx, task)));
+
+            const InstallCommand = proxyquire(modulePath, {
+                '../tasks/yarn-install': yarnInstallStub,
+                '../tasks/ensure-structure': ensureStructureStub,
+                '../utils/dir-is-empty': dirEmptyStub
+            });
+            const testInstance = new InstallCommand({listr: listrStub}, {cliVersion: '1.0.0'});
+            sinon.stub(testInstance, 'runCommand').resolves();
+            sinon.stub(testInstance, 'version').callsFake((ctx) => {
+                ctx.version = '6.0.0';
+            });
+            sinon.stub(testInstance, 'link').resolves();
+            sinon.stub(testInstance, 'defaultThemes').resolves();
+
+            return testInstance.run({version: '6.0.0', setup: false, 'check-empty': true, zip: null, 'no-cache': false}).then(() => {
+                const [, , opts] = yarnInstallStub.args[0];
+                opts.onCacheHit();
+                expect(task.title).to.equal('Installing Ghost v6.0.0 (cached)');
             });
         });
     });
